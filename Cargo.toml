@@ -5,7 +5,14 @@ authors = ["Wesley Moore <wes@wezm.net>"]
 edition = "2018"
 
 [dependencies]
-profont = "0.1"
-ssd1675 = "0.1"
 embedded-graphics = "0.4"
 linux-embedded-hal = "0.2"
+profont = "0.1"
+ssd1675 = "0.1"
+structopt = "0.2"
+systemstat = "0.1"
+tiny_http = "0.6"
+
+[profile.release]
+lto = true
+codegen-units = 1

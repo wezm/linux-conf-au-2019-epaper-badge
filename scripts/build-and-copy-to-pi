@@ -1,0 +1,9 @@
+#!/bin/sh
+
+set -e
+
+BINARY=target/arm-unknown-linux-gnueabi/release/lca2019
+
+cross build --target=arm-unknown-linux-gnueabi --release
+arm-linux-gnueabihf-strip "$BINARY"
+rsync -av "$BINARY" pi@10.0.0.18:

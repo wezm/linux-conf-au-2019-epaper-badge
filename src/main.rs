@@ -1,127 +1,159 @@
-extern crate linux_embedded_hal;
+use structopt::StructOpt;
+
 use linux_embedded_hal::Delay;
 
-extern crate ssd1675;
 use ssd1675::{Color, GraphicDisplay};
 
 // Graphics
-extern crate embedded_graphics;
 use embedded_graphics::coord::Coord;
 use embedded_graphics::prelude::*;
 use embedded_graphics::Drawing;
 
 // Font
-extern crate profont;
-use profont::{ProFont12Point, ProFont14Point, ProFont24Point, ProFont9Point};
+use profont::{ProFont14Point, ProFont18Point, ProFont24Point, ProFont9Point};
+
+// HTTP Server
+use tiny_http;
+
+// System info
+use systemstat::{IpAddr, Ipv4Addr, Platform, System};
 
 use std::process::Command;
+// use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use std::{fs, io};
 
 use lca2019::hardware;
 
-// Activate SPI, GPIO in raspi-config needs to be run with sudo because of some sysfs_gpio
-// permission problems and follow-up timing problems
-// see https://github.com/rust-embedded/rust-sysfs-gpio/issues/5 and follow-up issues
-
 const ROWS: u16 = 212;
 const COLS: u8 = 104;
+const THREADS: usize = 2;
+const LISTEN_ADDR: &str = "0.0.0.0";
+
+const TEMPLATE: &str = include_str!("hi.txt");
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "lca2019", about = "linux.conf.au 2019 conference badge.")]
+struct Options {
+    /// HTTP server port
+    #[structopt(short, long, default_value = "80")]
+    port: u16,
+
+    /// Interface whose IP is shown on the display
+    #[structopt(short, long, default_value = "wlan0")]
+    interface: String,
+
+    /// Don't try to update the ePaper display
+    #[structopt(short, long)]
+    nodisplay: bool,
+
+    /// Disable the HTTP server
+    #[structopt(short = "s", long)]
+    noserver: bool,
+}
 
 fn main() -> Result<(), std::io::Error> {
-    let mut delay = Delay {};
+    let options = Options::from_args();
 
-    let display = hardware::display(COLS, ROWS)?;
+    let system = System::new();
+    let wlan0_address = get_interface_ip(&system, &options.interface);
 
-    let mut black_buffer = [0u8; ROWS as usize * COLS as usize / 8];
-    let mut red_buffer = [0u8; ROWS as usize * COLS as usize / 8];
-    let mut display = GraphicDisplay::new(display, &mut black_buffer, &mut red_buffer);
-
-    // Main loop. Displays CPU temperature, uname, and uptime every minute with a red Raspberry Pi
-    // header.
-    loop {
-        display.reset(&mut delay).expect("error resetting display");
-        println!("Reset and initialised");
-        let one_minute = Duration::from_secs(60);
-
-        display.clear(Color::White);
-        println!("Clear");
-
-        display.draw(
-            ProFont24Point::render_str("Raspberry Pi")
-                .with_stroke(Some(Color::Red))
-                .with_fill(Some(Color::White))
-                .translate(Coord::new(1, -4))
-                .into_iter(),
+    let mut threads = Vec::new();
+    if !options.noserver {
+        let server = Arc::new(tiny_http::Server::http((LISTEN_ADDR, options.port)).unwrap());
+        println!(
+            "Now listening on http:://{}",
+            wlan0_address
+                .map(|ip| format!("{}:{}", ip, options.port))
+                .unwrap_or_else(|| format!("{}:{}", LISTEN_ADDR, options.port))
         );
 
-        if let Ok(cpu_temp) = read_cpu_temp() {
-            display.draw(
-                ProFont14Point::render_str("CPU Temp:")
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 30))
-                    .into_iter(),
-            );
-            display.draw(
-                ProFont12Point::render_str(&format!("{:.1}°C", cpu_temp))
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(95, 34))
-                    .into_iter(),
-            );
+        // let (tx, rx) = mpsc::channel();
+
+        for _ in 0..THREADS {
+            let server = server.clone();
+
+            threads.push(thread::spawn(move || {
+                for req in server.incoming_requests() {
+                    let response = tiny_http::Response::from_string(TEMPLATE);
+                    let _ = req.respond(response);
+                }
+            }));
         }
-
-        if let Some(uptime) = read_uptime() {
-            display.draw(
-                ProFont9Point::render_str(uptime.trim())
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 93))
-                    .into_iter(),
-            );
-        }
-
-        if let Some(uname) = read_uname() {
-            display.draw(
-                ProFont9Point::render_str(uname.trim())
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 84))
-                    .into_iter(),
-            );
-        }
-
-        display.update(&mut delay).expect("error updating display");
-        println!("Update...");
-
-        println!("Finished - going to sleep");
-        display.deep_sleep()?;
-
-        sleep(one_minute);
     }
-}
 
-fn read_cpu_temp() -> Result<f64, io::Error> {
-    fs::read_to_string("/sys/class/thermal/thermal_zone0/temp")?
-        .trim()
-        .parse::<i32>()
-        .map(|temp| temp as f64 / 1000.)
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-}
+    if !options.nodisplay {
+        let mut delay = Delay {};
 
-fn read_uptime() -> Option<String> {
-    Command::new("uptime")
-        .arg("-p")
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout).ok()
-            } else {
-                None
+        let display = hardware::display(COLS, ROWS)?;
+
+        let mut black_buffer = [0u8; ROWS as usize * COLS as usize / 8];
+        let mut red_buffer = [0u8; ROWS as usize * COLS as usize / 8];
+        let mut display = GraphicDisplay::new(display, &mut black_buffer, &mut red_buffer);
+
+        loop {
+            display.reset(&mut delay).expect("error resetting display");
+            println!("Reset and initialised");
+            let one_minute = Duration::from_secs(60);
+
+            display.clear(Color::White);
+            println!("Clear");
+
+            display.draw(
+                ProFont24Point::render_str("Wesley Moore")
+                    .with_stroke(Some(Color::Red))
+                    .with_fill(Some(Color::White))
+                    .translate(Coord::new(1, -4))
+                    .into_iter(),
+            );
+
+            display.draw(
+                ProFont14Point::render_str("wezm.net")
+                    .with_stroke(Some(Color::Black))
+                    .with_fill(Some(Color::White))
+                    .translate(Coord::new(1, 24))
+                    .into_iter(),
+            );
+
+            let ip = get_interface_ip(&system, &options.interface)
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| "?.?.?.?".to_string());
+            display.draw(
+                ProFont14Point::render_str(&format!("http://{}/hi", ip))
+                    .with_stroke(Some(Color::Black))
+                    .with_fill(Some(Color::White))
+                    .translate(Coord::new(1, 58))
+                    .into_iter(),
+            );
+
+            if let Some(uname) = read_uname() {
+                display.draw(
+                    ProFont9Point::render_str(uname.trim())
+                        .with_stroke(Some(Color::Black))
+                        .with_fill(Some(Color::White))
+                        .translate(Coord::new(1, 93))
+                        .into_iter(),
+                );
             }
-        })
+
+            display.update(&mut delay).expect("error updating display");
+            println!("Update...");
+
+            println!("Finished - going to sleep");
+            display.deep_sleep()?;
+
+            sleep(one_minute);
+        }
+    }
+
+    // TODO: Implement shutdown?
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    Ok(())
 }
 
 fn read_uname() -> Option<String> {
@@ -136,4 +168,21 @@ fn read_uname() -> Option<String> {
                 None
             }
         })
+}
+
+fn get_interface_ip(system: &System, interface: &str) -> Option<Ipv4Addr> {
+    if let Some(network) = system
+        .networks()
+        .ok()
+        .and_then(|mut info| info.remove(interface))
+    {
+        for addr in network.addrs {
+            match addr.addr {
+                IpAddr::V4(addr) => return Some(addr),
+                _ => (),
+            }
+        }
+    }
+
+    None
 }

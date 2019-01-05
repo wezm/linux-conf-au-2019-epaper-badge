@@ -1,0 +1,55 @@
+Hi I'm Wes!
+
+Welcome to my conference badge. It's powered by Linux and Rust running on a
+Raspberry Pi Zero W with a tri-colour Inky pHAT ePaper dispay.
+
+
+Say Hello
+---------
+
+Say hello in person and on the badge. To increment the hello counter on the
+badge:
+
+    curl -X POST http://{{ip}}/hi
+
+
+About Me
+--------
+
+I'm a software developer from Melbourne, Australia. I currently work at
+GreenSync building systems to help make better use of renewable energy.
+
+
+Find me on the Internet at:
+
+   Email: wes@wezm.net
+  GitHub: https://github.com/wezm
+Mastodon: https://mastodon.social/@wezm
+ Twitter: https://twitter.com/wezm
+ Website: http://www.wezm.net/
+
+
+Host Information
+----------------
+
+    __  __    pi@raspberrypi
+   (_\)(/_)   OS:        Raspbian
+   (_(__)_)   KERNEL:    Linux 4.14.71+
+  (_(_)(_)_)  UPTIME:    1 week, 3 days, 8 hours, 16 minutes
+   (_(__)_)   PACKAGES:  504
+     (__)     MEMORY:    bash
+
+              total        used        free        buff/cache
+Mem:           433M         24M        168M              240M
+Swap:           99M          0B         99M
+
+
+              .------------------------.
+              |    Powered by Rust!    |
+              '------------------------'
+                              /
+                             /
+                      _~^~^~_
+                  \) /  o o  \ (/
+                    '_   -   _'
+                    / '-----' \

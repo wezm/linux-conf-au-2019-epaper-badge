@@ -11,6 +11,10 @@ as follows:
 After it is built copy `target/arm-unknown-linux-gnueabi/release/lca2019` to
 the Raspberry Pi.
 
+## Running
+
+    sudo setcap cap_net_bind_service=ep lca2019
+
 ## License
 
 This project is dual licenced under:
