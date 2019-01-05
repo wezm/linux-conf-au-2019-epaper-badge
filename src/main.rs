@@ -14,6 +14,7 @@ use profont::{ProFont14Point, ProFont18Point, ProFont24Point, ProFont9Point};
 
 // HTTP Server
 use tiny_http;
+use askama::Template;
 
 // System info
 use systemstat::{IpAddr, Ipv4Addr, Platform, System};
@@ -32,7 +33,7 @@ const COLS: u8 = 104;
 const THREADS: usize = 2;
 const LISTEN_ADDR: &str = "0.0.0.0";
 
-const TEMPLATE: &str = include_str!("hi.txt");
+const FERRIS: &str = include_str!("ferris.txt");
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "lca2019", about = "linux.conf.au 2019 conference badge.")]
@@ -52,6 +53,12 @@ struct Options {
     /// Disable the HTTP server
     #[structopt(short = "s", long)]
     noserver: bool,
+}
+
+#[derive(Template)]
+#[template(path = "hi.txt")]
+struct HelloTemplate<'a> {
+    ip: &'a str,
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -77,8 +84,18 @@ fn main() -> Result<(), std::io::Error> {
 
             threads.push(thread::spawn(move || {
                 for req in server.incoming_requests() {
-                    let response = tiny_http::Response::from_string(TEMPLATE);
+                    let ip_string = wlan0_address.map(|ip| ip.to_string()).unwrap_or_else(|| "?.?.?.?".to_string());
+                    let template = HelloTemplate { ip: &ip_string };
+
+                    let response_data = template.render().ok().unwrap_or_else(|| "Internal Server Error".to_string());
+
+                    // GET /
+                    let response = tiny_http::Response::from_string(response_data);
                     let _ = req.respond(response);
+
+                    // POST /hi
+
+                    // Else 404
                 }
             }));
         }
@@ -121,7 +138,7 @@ fn main() -> Result<(), std::io::Error> {
                 .map(|ip| ip.to_string())
                 .unwrap_or_else(|| "?.?.?.?".to_string());
             display.draw(
-                ProFont14Point::render_str(&format!("http://{}/hi", ip))
+                ProFont14Point::render_str(&format!("http://{}/", ip))
                     .with_stroke(Some(Color::Black))
                     .with_fill(Some(Color::White))
                     .translate(Coord::new(1, 58))
