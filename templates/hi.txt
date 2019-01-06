@@ -33,15 +33,14 @@ Host Information
 ----------------
 
     __  __    pi@raspberrypi
-   (_\)(/_)   OS:        Raspbian
-   (_(__)_)   KERNEL:    Linux 4.14.71+
-  (_(_)(_)_)  UPTIME:    1 week, 3 days, 8 hours, 16 minutes
+   (_\)(/_)   OS:        {{ os_name }}
+   (_(__)_)   KERNEL:    {{ uname.sysname() }} {{ uname.release() }}
+  (_(_)(_)_)  UPTIME:    {{ uptime }}
    (_(__)_)   PACKAGES:  504
-     (__)     MEMORY:    bash
-
-              total        used        free        buff/cache
-Mem:           433M         24M        168M              240M
-Swap:           99M          0B         99M
+{% match memory %}
+  {%- when Some with (mem) %}     (__)     MEMORY:    {{ mem.free }} free of {{ mem.total }}
+  {%- when None %}     (__)     MEMORY:    unknown
+{% endmatch %}
 
 
               .------------------------.

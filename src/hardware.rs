@@ -25,7 +25,22 @@ const LUT: [u8; 70] = [
     0,    0,    0,    0,     0    // 6
 ];
 
-pub fn display<'a>(cols: u8, rows: u16) -> Result<(ssd1675::display::Display<'a, ssd1675::interface::Interface<linux_embedded_hal::Spidev, linux_embedded_hal::Pin, linux_embedded_hal::Pin, linux_embedded_hal::Pin, linux_embedded_hal::Pin>>), std::io::Error> {
+pub fn display<'a>(
+    cols: u8,
+    rows: u16,
+) -> Result<
+    (ssd1675::display::Display<
+        'a,
+        ssd1675::interface::Interface<
+            linux_embedded_hal::Spidev,
+            linux_embedded_hal::Pin,
+            linux_embedded_hal::Pin,
+            linux_embedded_hal::Pin,
+            linux_embedded_hal::Pin,
+        >,
+    >),
+    std::io::Error,
+> {
     // Configure SPI
     let mut spi = Spidev::open("/dev/spidev0.0").expect("SPI device");
     let options = SpidevOptions::new()
@@ -67,10 +82,7 @@ pub fn display<'a>(cols: u8, rows: u16) -> Result<(ssd1675::display::Display<'a,
     let controller = ssd1675::Interface::new(spi, cs, busy, dc, reset);
 
     let config = Builder::new()
-        .dimensions(Dimensions {
-            rows,
-            cols,
-        })
+        .dimensions(Dimensions { rows, cols })
         .rotation(Rotation::Rotate270)
         .lut(&LUT)
         .build()

@@ -8,10 +8,12 @@ edition = "2018"
 askama = "0.7"
 embedded-graphics = "0.4"
 linux-embedded-hal = "0.2"
+nix = "0.11"
+rs-release = "0.1"
 profont = "0.1"
 ssd1675 = "0.1"
 structopt = "0.2"
-systemstat = "0.1"
+systemstat = { version = "0.1", git ="https://github.com/wezm/systemstat.git", branch = "upgrade-bytesize" }
 tiny_http = "0.6"
 
 [build-dependencies]

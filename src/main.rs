@@ -13,12 +13,15 @@ use embedded_graphics::Drawing;
 use profont::{ProFont14Point, ProFont18Point, ProFont24Point, ProFont9Point};
 
 // HTTP Server
-use tiny_http;
 use askama::Template;
+use tiny_http;
 
 // System info
-use systemstat::{IpAddr, Ipv4Addr, Platform, System};
+use nix::sys::utsname::{uname, UtsName};
+use rs_release::get_os_release;
+use systemstat::{ByteSize, IpAddr, Ipv4Addr, Memory, Platform, System};
 
+use std::fmt;
 use std::process::Command;
 // use std::sync::mpsc;
 use std::sync::Arc;
@@ -32,6 +35,8 @@ const ROWS: u16 = 212;
 const COLS: u8 = 104;
 const THREADS: usize = 2;
 const LISTEN_ADDR: &str = "0.0.0.0";
+const ONE_DAY: u64 = 24 * 60 * 60;
+const ONE_HOUR: u64 = 60 * 60;
 
 const FERRIS: &str = include_str!("ferris.txt");
 
@@ -59,14 +64,57 @@ struct Options {
 #[template(path = "hi.txt")]
 struct HelloTemplate<'a> {
     ip: &'a str,
+    os_name: &'a str,
+    uname: &'a UtsName,
+    memory: Option<Memory>,
+    uptime: Uptime,
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+struct Uptime(u64);
+
+impl Uptime {
+    pub fn new(seconds: u64) -> Self {
+        Uptime(seconds)
+    }
+}
+
+impl fmt::Display for Uptime {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        let days = self.0 / ONE_DAY;
+        let total_hours = self.0 % ONE_DAY;
+        let hours = total_hours / ONE_HOUR;
+        let minutes = total_hours % ONE_HOUR / 60;
+
+        let mut fragments = vec![];
+        if days > 0 {
+            fragments.push(format!("{}d", days));
+        }
+        if hours > 0 {
+            fragments.push(format!("{}h", hours));
+        }
+        if minutes > 0 {
+            fragments.push(format!("{}m", minutes));
+        }
+        if days == 0 && hours == 0 && minutes == 0 {
+            fragments.push(format!("{} secs", self.0));
+        }
+
+        f.write_str(&fragments.join(" "))
+    }
 }
 
 fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
 
-    let system = System::new();
+    let system = Arc::new(System::new());
     let wlan0_address = get_interface_ip(&system, &options.interface);
-
+    let os_name = Arc::new(
+        get_os_release()
+            .ok()
+            .and_then(|mut hash| hash.remove("NAME"))
+            .unwrap_or_else(|| "Unknown".to_string()),
+    );
     let mut threads = Vec::new();
     if !options.noserver {
         let server = Arc::new(tiny_http::Server::http((LISTEN_ADDR, options.port)).unwrap());
@@ -81,13 +129,32 @@ fn main() -> Result<(), std::io::Error> {
 
         for _ in 0..THREADS {
             let server = server.clone();
+            let system = system.clone();
+            let os_name = os_name.clone();
+            let utsname = uname();
 
             threads.push(thread::spawn(move || {
                 for req in server.incoming_requests() {
-                    let ip_string = wlan0_address.map(|ip| ip.to_string()).unwrap_or_else(|| "?.?.?.?".to_string());
-                    let template = HelloTemplate { ip: &ip_string };
+                    let ip_string = wlan0_address
+                        .map(|ip| ip.to_string())
+                        .unwrap_or_else(|| "?.?.?.?".to_string());
+                    let uptime = system
+                        .uptime()
+                        .ok()
+                        .map(|uptime| Uptime::new(uptime.as_secs()))
+                        .unwrap_or_default();
+                    let template = HelloTemplate {
+                        ip: &ip_string,
+                        memory: system.memory().ok(),
+                        uptime,
+                        os_name: &os_name,
+                        uname: &utsname,
+                    };
 
-                    let response_data = template.render().ok().unwrap_or_else(|| "Internal Server Error".to_string());
+                    let response_data = template
+                        .render()
+                        .ok()
+                        .unwrap_or_else(|| "Internal Server Error".to_string());
 
                     // GET /
                     let response = tiny_http::Response::from_string(response_data);
@@ -202,4 +269,33 @@ fn get_interface_ip(system: &System, interface: &str) -> Option<Ipv4Addr> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uptime_days() {
+        let uptime = Uptime::new(946560);
+        assert_eq!(uptime.to_string(), String::from("10d 22h 56m"));
+    }
+
+    #[test]
+    fn test_uptime_hours() {
+        let uptime = Uptime::new(12345);
+        assert_eq!(uptime.to_string(), String::from("3h 25m"));
+    }
+
+    #[test]
+    fn test_uptime_minutes() {
+        let uptime = Uptime::new(62);
+        assert_eq!(uptime.to_string(), String::from("1m"));
+    }
+
+    #[test]
+    fn test_uptime_seconds() {
+        let uptime = Uptime::new(42);
+        assert_eq!(uptime.to_string(), String::from("42 secs"));
+    }
 }
