@@ -1,3 +1,8 @@
+mod app;
+mod hardware;
+mod system;
+mod webserver;
+
 use structopt::StructOpt;
 
 use linux_embedded_hal::Delay;
@@ -10,42 +15,31 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::Drawing;
 
 // Font
-use profont::{ProFont14Point, ProFont18Point, ProFont24Point, ProFont9Point};
+use profont::{ProFont14Point, ProFont24Point, ProFont9Point};
 
 // HTTP Server
-use askama::Template;
-use futures::{future, Future, Stream};
-use hyper::service::{service_fn, service_fn_ok};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use futures::Future;
+use hyper::service::service_fn;
+use hyper::Server;
 use std::net::SocketAddr;
 
 // System info
-use nix::sys::utsname::{uname, UtsName};
+use nix::sys::utsname::uname;
 use rs_release::get_os_release;
-use systemstat::{ByteSize, IpAddr, Ipv4Addr, Memory, Platform, System};
+use systemstat::{IpAddr, Ipv4Addr, Platform, System};
 
-use std::fmt;
 use std::process::Command;
 // use std::sync::mpsc;
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-use lca2019::hardware;
+use crate::app::State;
+use crate::system::Uptime;
 
 const ROWS: u16 = 212;
 const COLS: u8 = 104;
-const THREADS: usize = 2;
 const LISTEN_ADDR: &str = "0.0.0.0";
-const ONE_DAY: u64 = 24 * 60 * 60;
-const ONE_HOUR: u64 = 60 * 60;
-
-static MISSING: &[u8] = b"Missing field";
-static NOT_FOUND: &[u8] = b"Not found";
-static NOTNUMERIC: &[u8] = b"Number field is not numeric";
-const FERRIS: &str = include_str!("ferris.txt");
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "lca2019", about = "linux.conf.au 2019 conference badge.")]
@@ -69,61 +63,6 @@ struct Options {
     /// Don't loop, just run once and exit
     #[structopt(short = "o", long)]
     oneshot: bool,
-}
-
-#[derive(Template)]
-#[template(path = "hi.txt")]
-struct HelloTemplate<'a> {
-    hi_count: usize,
-    ip: &'a str,
-    os_name: &'a str,
-    uname: &'a UtsName,
-    memory: &'a Option<Memory>,
-    uptime: &'a Uptime,
-}
-
-// #[derive(Debug)]
-struct State {
-    hi_count: usize,
-    ip: Option<Ipv4Addr>,
-    os_name: String,
-    uname: UtsName,
-    memory: Option<Memory>,
-    uptime: Uptime,
-}
-
-#[derive(Debug, Copy, Clone, Default)]
-struct Uptime(u64);
-
-impl Uptime {
-    pub fn new(seconds: u64) -> Self {
-        Uptime(seconds)
-    }
-}
-
-impl fmt::Display for Uptime {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        let days = self.0 / ONE_DAY;
-        let total_hours = self.0 % ONE_DAY;
-        let hours = total_hours / ONE_HOUR;
-        let minutes = total_hours % ONE_HOUR / 60;
-
-        let mut fragments = vec![];
-        if days > 0 {
-            fragments.push(format!("{}d", days));
-        }
-        if hours > 0 {
-            fragments.push(format!("{}h", hours));
-        }
-        if minutes > 0 {
-            fragments.push(format!("{}m", minutes));
-        }
-        if days == 0 && hours == 0 && minutes == 0 {
-            fragments.push(format!("{} secs", self.0));
-        }
-
-        f.write_str(&fragments.join(" "))
-    }
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -231,7 +170,7 @@ fn main() -> Result<(), std::io::Error> {
             // FIXME: This double clone doesn't seem right... but works
             let state = state.clone();
 
-            service_fn(move |req| param_example(state.clone(), req))
+            service_fn(move |req| webserver::handle_request(state.clone(), req))
         };
 
         let addr = SocketAddr::from((LISTEN_ADDR.parse::<Ipv4Addr>().unwrap(), options.port));
@@ -245,64 +184,11 @@ fn main() -> Result<(), std::io::Error> {
                 .map(|ip| format!("{}:{}", ip, options.port))
                 .unwrap_or_else(|| format!("{}:{}", LISTEN_ADDR, options.port))
         );
+
         hyper::rt::run(server);
     }
 
     Ok(())
-}
-
-fn param_example(
-    state: Arc<RwLock<State>>,
-    req: Request<Body>,
-) -> Box<Future<Item = Response<Body>, Error = hyper::Error> + Send> {
-    match (req.method(), req.uri().path()) {
-        (&Method::GET, "/")
-        | (&Method::GET, "/hi")
-        | (&Method::HEAD, "/")
-        | (&Method::HEAD, "/hi") => {
-            let state = state.read().expect("poisioned"); // FIXME: Deal with this
-
-            // FIXME: Don't do this everytime
-            let ip_string = state
-                .ip
-                .map(|ip| ip.to_string())
-                .unwrap_or_else(|| "?.?.?.?".to_string());
-
-            let template = HelloTemplate {
-                hi_count: state.hi_count,
-                ip: &ip_string,
-                memory: &state.memory,
-                uptime: &state.uptime,
-                os_name: &state.os_name,
-                uname: &state.uname,
-            };
-
-            let response_data = template
-                .render()
-                .ok()
-                .unwrap_or_else(|| "Internal Server Error".to_string());
-            // FIXME: Set HTTP status
-            Box::new(future::ok(Response::new(response_data.into())))
-        }
-        (&Method::POST, "/hi") => {
-            Box::new(req.into_body().concat2().map(move |_b| {
-                // Increment the hi count
-                let body = {
-                    let mut state = state.write().expect("poisioned");
-                    state.hi_count += 1;
-
-                    format!("Hello!, your number is {}", state.hi_count)
-                };
-                Response::new(body.into())
-            }))
-        }
-        _ => Box::new(future::ok(
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(NOT_FOUND.into())
-                .unwrap(),
-        )),
-    }
 }
 
 fn read_uname() -> Option<String> {
