@@ -13,8 +13,11 @@ use embedded_graphics::Drawing;
 use profont::{ProFont14Point, ProFont18Point, ProFont24Point, ProFont9Point};
 
 // HTTP Server
+use std::net::SocketAddr;
 use askama::Template;
-use tiny_http;
+use futures::{future, Future, Stream};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use hyper::service::{service_fn, service_fn_ok};
 
 // System info
 use nix::sys::utsname::{uname, UtsName};
@@ -24,10 +27,11 @@ use systemstat::{ByteSize, IpAddr, Ipv4Addr, Memory, Platform, System};
 use std::fmt;
 use std::process::Command;
 // use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
+use std::collections::HashMap;
 
 use lca2019::hardware;
 
@@ -38,6 +42,9 @@ const LISTEN_ADDR: &str = "0.0.0.0";
 const ONE_DAY: u64 = 24 * 60 * 60;
 const ONE_HOUR: u64 = 60 * 60;
 
+static MISSING: &[u8] = b"Missing field";
+static NOT_FOUND: &[u8] = b"Not found";
+static NOTNUMERIC: &[u8] = b"Number field is not numeric";
 const FERRIS: &str = include_str!("ferris.txt");
 
 #[derive(StructOpt, Debug)]
@@ -58,14 +65,30 @@ struct Options {
     /// Disable the HTTP server
     #[structopt(short = "s", long)]
     noserver: bool,
+
+    /// Don't loop, just run once and exit
+    #[structopt(short = "o", long)]
+    oneshot: bool,
 }
 
 #[derive(Template)]
 #[template(path = "hi.txt")]
 struct HelloTemplate<'a> {
+    hi_count: usize,
     ip: &'a str,
     os_name: &'a str,
     uname: &'a UtsName,
+    memory: &'a Option<Memory>,
+    uptime: &'a Uptime,
+}
+
+
+// #[derive(Debug)]
+struct State {
+    hi_count: usize,
+    ip: Option<Ipv4Addr>,
+    os_name: String,
+    uname: UtsName,
     memory: Option<Memory>,
     uptime: Uptime,
 }
@@ -107,66 +130,25 @@ impl fmt::Display for Uptime {
 fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
 
-    let system = Arc::new(System::new());
+    let system = System::new();
     let wlan0_address = get_interface_ip(&system, &options.interface);
-    let os_name = Arc::new(
+    let os_name = 
         get_os_release()
             .ok()
             .and_then(|mut hash| hash.remove("NAME"))
-            .unwrap_or_else(|| "Unknown".to_string()),
-    );
-    let mut threads = Vec::new();
-    if !options.noserver {
-        let server = Arc::new(tiny_http::Server::http((LISTEN_ADDR, options.port)).unwrap());
-        println!(
-            "Now listening on http:://{}",
-            wlan0_address
-                .map(|ip| format!("{}:{}", ip, options.port))
-                .unwrap_or_else(|| format!("{}:{}", LISTEN_ADDR, options.port))
-        );
+            .unwrap_or_else(|| "Unknown".to_string());
 
-        // let (tx, rx) = mpsc::channel();
-
-        for _ in 0..THREADS {
-            let server = server.clone();
-            let system = system.clone();
-            let os_name = os_name.clone();
-            let utsname = uname();
-
-            threads.push(thread::spawn(move || {
-                for req in server.incoming_requests() {
-                    let ip_string = wlan0_address
-                        .map(|ip| ip.to_string())
-                        .unwrap_or_else(|| "?.?.?.?".to_string());
-                    let uptime = system
-                        .uptime()
+    let state = Arc::new(State {
+        hi_count: 0,
+        ip: wlan0_address,
+        os_name: os_name,
+        uname: uname(),
+        memory: system.memory().ok(),
+        uptime: system.uptime()
                         .ok()
                         .map(|uptime| Uptime::new(uptime.as_secs()))
-                        .unwrap_or_default();
-                    let template = HelloTemplate {
-                        ip: &ip_string,
-                        memory: system.memory().ok(),
-                        uptime,
-                        os_name: &os_name,
-                        uname: &utsname,
-                    };
-
-                    let response_data = template
-                        .render()
-                        .ok()
-                        .unwrap_or_else(|| "Internal Server Error".to_string());
-
-                    // GET /
-                    let response = tiny_http::Response::from_string(response_data);
-                    let _ = req.respond(response);
-
-                    // POST /hi
-
-                    // Else 404
-                }
-            }));
-        }
-    }
+                        .unwrap_or_default(),
+    });
 
     if !options.nodisplay {
         let mut delay = Delay {};
@@ -177,6 +159,7 @@ fn main() -> Result<(), std::io::Error> {
         let mut red_buffer = [0u8; ROWS as usize * COLS as usize / 8];
         let mut display = GraphicDisplay::new(display, &mut black_buffer, &mut red_buffer);
 
+        // TODO: Schedule this as a tokio timer
         loop {
             display.reset(&mut delay).expect("error resetting display");
             println!("Reset and initialised");
@@ -197,7 +180,7 @@ fn main() -> Result<(), std::io::Error> {
                 ProFont14Point::render_str("wezm.net")
                     .with_stroke(Some(Color::Black))
                     .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 24))
+                    .translate(Coord::new(1, 20))
                     .into_iter(),
             );
 
@@ -209,6 +192,13 @@ fn main() -> Result<(), std::io::Error> {
                     .with_stroke(Some(Color::Black))
                     .with_fill(Some(Color::White))
                     .translate(Coord::new(1, 58))
+                    .into_iter(),
+            );
+            display.draw(
+                ProFont14Point::render_str("curl")
+                    .with_stroke(Some(Color::Black))
+                    .with_fill(Some(Color::White))
+                    .translate(Coord::new(1, 45))
                     .into_iter(),
             );
 
@@ -228,16 +218,121 @@ fn main() -> Result<(), std::io::Error> {
             println!("Finished - going to sleep");
             display.deep_sleep()?;
 
+            if options.oneshot {
+                break;
+            }
+
             sleep(one_minute);
         }
     }
 
-    // TODO: Implement shutdown?
-    for thread in threads {
-        thread.join().unwrap();
+    if !options.noserver {
+        // TODO: Implement shutdown?
+        let new_service = move || {
+            // FIXME: This double clone doesn't seem right... but works
+            let state = state.clone();
+
+            service_fn(move |req| param_example(state.clone(), req))
+        };
+
+        let addr = SocketAddr::from((LISTEN_ADDR.parse::<Ipv4Addr>().unwrap(), options.port));
+        let server = Server::bind(&addr)
+            .serve(new_service)
+            .map_err(|e| eprintln!("server error: {}", e));
+
+        println!(
+            "Starting server on http:://{}",
+            wlan0_address
+                .map(|ip| format!("{}:{}", ip, options.port))
+                .unwrap_or_else(|| format!("{}:{}", LISTEN_ADDR, options.port))
+        );
+        hyper::rt::run(server);
     }
 
     Ok(())
+}
+
+fn param_example(state: Arc<State>, req: Request<Body>) -> Box<Future<Item=Response<Body>, Error=hyper::Error> + Send> {
+    match (req.method(), req.uri().path()) {
+        (&Method::GET, "/") | (&Method::GET, "/hi") => {
+            // FIXME: Don't do this everytime
+            let ip_string = state.ip
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| "?.?.?.?".to_string());
+
+            let template = HelloTemplate {
+                hi_count: state.hi_count,
+                ip: &ip_string,
+                memory: &state.memory,
+                uptime: &state.uptime,
+                os_name: &state.os_name,
+                uname: &state.uname,
+            };
+
+            let response_data = template
+                .render()
+                .ok()
+                .unwrap_or_else(|| "Internal Server Error".to_string());
+            Box::new(future::ok(Response::new(response_data.into())))
+        },
+        (&Method::POST, "/post") => {
+            Box::new(req.into_body().concat2().map(|b| {
+                // Parse the request body. form_urlencoded::parse
+                // always succeeds, but in general parsing may
+                // fail (for example, an invalid post of json), so
+                // returning early with BadRequest may be
+                // necessary.
+                //
+                // Warning: this is a simplified use case. In
+                // principle names can appear multiple times in a
+                // form, and the values should be rolled up into a
+                // HashMap<String, Vec<String>>. However in this
+                // example the simpler approach is sufficient.
+                let params: HashMap<String, String> = HashMap::new();//form_urlencoded::parse(b.as_ref()).into_owned().collect::<HashMap<String, String>>();
+
+                // Validate the request parameters, returning
+                // early if an invalid input is detected.
+                let name = if let Some(n) = params.get("name") {
+                    n
+                } else {
+                    return Response::builder()
+                        .status(StatusCode::UNPROCESSABLE_ENTITY)
+                        .body(MISSING.into())
+                        .unwrap();
+                };
+                let number = if let Some(n) = params.get("number") {
+                    if let Ok(v) = n.parse::<f64>() {
+                        v
+                    } else {
+                        return Response::builder()
+                            .status(StatusCode::UNPROCESSABLE_ENTITY)
+                            .body(NOTNUMERIC.into())
+                            .unwrap();
+                    }
+                } else {
+                    return Response::builder()
+                        .status(StatusCode::UNPROCESSABLE_ENTITY)
+                        .body(MISSING.into())
+                        .unwrap();
+                };
+
+                // Render the response. This will often involve
+                // calls to a database or web service, which will
+                // require creating a new stream for the response
+                // body. Since those may fail, other error
+                // responses such as InternalServiceError may be
+                // needed here, too.
+                let body = format!("Hello {}, your number is {}", name, number);
+                Response::new(body.into())
+            }))
+        },
+        _ => {
+            Box::new(future::ok(Response::builder()
+                                .status(StatusCode::NOT_FOUND)
+                                .body(NOT_FOUND.into())
+                                .unwrap()))
+        }
+    }
 }
 
 fn read_uname() -> Option<String> {

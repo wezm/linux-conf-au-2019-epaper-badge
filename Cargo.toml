@@ -14,7 +14,9 @@ profont = "0.1"
 ssd1675 = "0.1"
 structopt = "0.2"
 systemstat = { version = "0.1", git ="https://github.com/wezm/systemstat.git", branch = "upgrade-bytesize" }
-tiny_http = "0.6"
+hyper = "0.12.20"
+futures = "0.1"
+tokio = "<= 1.0"
 
 [build-dependencies]
 askama = "0.7"
