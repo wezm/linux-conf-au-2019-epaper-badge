@@ -13,11 +13,11 @@ use embedded_graphics::Drawing;
 use profont::{ProFont14Point, ProFont18Point, ProFont24Point, ProFont9Point};
 
 // HTTP Server
-use std::net::SocketAddr;
 use askama::Template;
 use futures::{future, Future, Stream};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use hyper::service::{service_fn, service_fn_ok};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use std::net::SocketAddr;
 
 // System info
 use nix::sys::utsname::{uname, UtsName};
@@ -27,11 +27,14 @@ use systemstat::{ByteSize, IpAddr, Ipv4Addr, Memory, Platform, System};
 use std::fmt;
 use std::process::Command;
 // use std::sync::mpsc;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use std::collections::HashMap;
 
 use lca2019::hardware;
 
@@ -82,7 +85,6 @@ struct HelloTemplate<'a> {
     uptime: &'a Uptime,
 }
 
-
 // #[derive(Debug)]
 struct State {
     hi_count: usize,
@@ -132,11 +134,10 @@ fn main() -> Result<(), std::io::Error> {
 
     let system = System::new();
     let wlan0_address = get_interface_ip(&system, &options.interface);
-    let os_name = 
-        get_os_release()
-            .ok()
-            .and_then(|mut hash| hash.remove("NAME"))
-            .unwrap_or_else(|| "Unknown".to_string());
+    let os_name = get_os_release()
+        .ok()
+        .and_then(|mut hash| hash.remove("NAME"))
+        .unwrap_or_else(|| "Unknown".to_string());
 
     let state = Arc::new(State {
         hi_count: 0,
@@ -144,10 +145,11 @@ fn main() -> Result<(), std::io::Error> {
         os_name: os_name,
         uname: uname(),
         memory: system.memory().ok(),
-        uptime: system.uptime()
-                        .ok()
-                        .map(|uptime| Uptime::new(uptime.as_secs()))
-                        .unwrap_or_default(),
+        uptime: system
+            .uptime()
+            .ok()
+            .map(|uptime| Uptime::new(uptime.as_secs()))
+            .unwrap_or_default(),
     });
 
     if !options.nodisplay {
@@ -252,11 +254,15 @@ fn main() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn param_example(state: Arc<State>, req: Request<Body>) -> Box<Future<Item=Response<Body>, Error=hyper::Error> + Send> {
+fn param_example(
+    state: Arc<State>,
+    req: Request<Body>,
+) -> Box<Future<Item = Response<Body>, Error = hyper::Error> + Send> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/") | (&Method::GET, "/hi") => {
             // FIXME: Don't do this everytime
-            let ip_string = state.ip
+            let ip_string = state
+                .ip
                 .map(|ip| ip.to_string())
                 .unwrap_or_else(|| "?.?.?.?".to_string());
 
@@ -274,7 +280,7 @@ fn param_example(state: Arc<State>, req: Request<Body>) -> Box<Future<Item=Respo
                 .ok()
                 .unwrap_or_else(|| "Internal Server Error".to_string());
             Box::new(future::ok(Response::new(response_data.into())))
-        },
+        }
         (&Method::POST, "/post") => {
             Box::new(req.into_body().concat2().map(|b| {
                 // Parse the request body. form_urlencoded::parse
@@ -288,7 +294,7 @@ fn param_example(state: Arc<State>, req: Request<Body>) -> Box<Future<Item=Respo
                 // form, and the values should be rolled up into a
                 // HashMap<String, Vec<String>>. However in this
                 // example the simpler approach is sufficient.
-                let params: HashMap<String, String> = HashMap::new();//form_urlencoded::parse(b.as_ref()).into_owned().collect::<HashMap<String, String>>();
+                let params: HashMap<String, String> = HashMap::new(); //form_urlencoded::parse(b.as_ref()).into_owned().collect::<HashMap<String, String>>();
 
                 // Validate the request parameters, returning
                 // early if an invalid input is detected.
@@ -325,13 +331,13 @@ fn param_example(state: Arc<State>, req: Request<Body>) -> Box<Future<Item=Respo
                 let body = format!("Hello {}, your number is {}", name, number);
                 Response::new(body.into())
             }))
-        },
-        _ => {
-            Box::new(future::ok(Response::builder()
-                                .status(StatusCode::NOT_FOUND)
-                                .body(NOT_FOUND.into())
-                                .unwrap()))
         }
+        _ => Box::new(future::ok(
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(NOT_FOUND.into())
+                .unwrap(),
+        )),
     }
 }
 
