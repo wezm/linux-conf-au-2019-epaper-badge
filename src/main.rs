@@ -28,10 +28,7 @@ use std::fmt;
 use std::process::Command;
 // use std::sync::mpsc;
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
@@ -139,7 +136,7 @@ fn main() -> Result<(), std::io::Error> {
         .and_then(|mut hash| hash.remove("NAME"))
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let state = Arc::new(State {
+    let state = Arc::new(RwLock::new(State {
         hi_count: 0,
         ip: wlan0_address,
         os_name: os_name,
@@ -150,7 +147,7 @@ fn main() -> Result<(), std::io::Error> {
             .ok()
             .map(|uptime| Uptime::new(uptime.as_secs()))
             .unwrap_or_default(),
-    });
+    }));
 
     if !options.nodisplay {
         let mut delay = Delay {};
@@ -255,11 +252,16 @@ fn main() -> Result<(), std::io::Error> {
 }
 
 fn param_example(
-    state: Arc<State>,
+    state: Arc<RwLock<State>>,
     req: Request<Body>,
 ) -> Box<Future<Item = Response<Body>, Error = hyper::Error> + Send> {
     match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") | (&Method::GET, "/hi") => {
+        (&Method::GET, "/")
+        | (&Method::GET, "/hi")
+        | (&Method::HEAD, "/")
+        | (&Method::HEAD, "/hi") => {
+            let state = state.read().expect("poisioned"); // FIXME: Deal with this
+
             // FIXME: Don't do this everytime
             let ip_string = state
                 .ip
@@ -279,56 +281,18 @@ fn param_example(
                 .render()
                 .ok()
                 .unwrap_or_else(|| "Internal Server Error".to_string());
+            // FIXME: Set HTTP status
             Box::new(future::ok(Response::new(response_data.into())))
         }
-        (&Method::POST, "/post") => {
-            Box::new(req.into_body().concat2().map(|b| {
-                // Parse the request body. form_urlencoded::parse
-                // always succeeds, but in general parsing may
-                // fail (for example, an invalid post of json), so
-                // returning early with BadRequest may be
-                // necessary.
-                //
-                // Warning: this is a simplified use case. In
-                // principle names can appear multiple times in a
-                // form, and the values should be rolled up into a
-                // HashMap<String, Vec<String>>. However in this
-                // example the simpler approach is sufficient.
-                let params: HashMap<String, String> = HashMap::new(); //form_urlencoded::parse(b.as_ref()).into_owned().collect::<HashMap<String, String>>();
+        (&Method::POST, "/hi") => {
+            Box::new(req.into_body().concat2().map(move |_b| {
+                // Increment the hi count
+                let body = {
+                    let mut state = state.write().expect("poisioned");
+                    state.hi_count += 1;
 
-                // Validate the request parameters, returning
-                // early if an invalid input is detected.
-                let name = if let Some(n) = params.get("name") {
-                    n
-                } else {
-                    return Response::builder()
-                        .status(StatusCode::UNPROCESSABLE_ENTITY)
-                        .body(MISSING.into())
-                        .unwrap();
+                    format!("Hello!, your number is {}", state.hi_count)
                 };
-                let number = if let Some(n) = params.get("number") {
-                    if let Ok(v) = n.parse::<f64>() {
-                        v
-                    } else {
-                        return Response::builder()
-                            .status(StatusCode::UNPROCESSABLE_ENTITY)
-                            .body(NOTNUMERIC.into())
-                            .unwrap();
-                    }
-                } else {
-                    return Response::builder()
-                        .status(StatusCode::UNPROCESSABLE_ENTITY)
-                        .body(MISSING.into())
-                        .unwrap();
-                };
-
-                // Render the response. This will often involve
-                // calls to a database or web service, which will
-                // require creating a new stream for the response
-                // body. Since those may fail, other error
-                // responses such as InternalServiceError may be
-                // needed here, too.
-                let body = format!("Hello {}, your number is {}", name, number);
                 Response::new(body.into())
             }))
         }
