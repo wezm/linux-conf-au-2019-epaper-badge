@@ -15,7 +15,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::Drawing;
 
 // Font
-use profont::{ProFont14Point, ProFont24Point, ProFont9Point};
+use profont::{ProFont14Point, ProFont18Point, ProFont24Point};
 
 // HTTP Server
 use futures::Future;
@@ -118,7 +118,26 @@ fn main() -> Result<(), std::io::Error> {
                 ProFont14Point::render_str("wezm.net")
                     .with_stroke(Some(Color::Black))
                     .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 20))
+                    .translate(Coord::new(1, 22))
+                    .into_iter(),
+            );
+
+            let hi = {
+                let state = state.read().expect("poisioned");
+                state.hi_count.to_string()
+            };
+            display.draw(
+                ProFont24Point::render_str(&hi)
+                    .with_stroke(Some(Color::Black))
+                    .with_fill(Some(Color::White))
+                    .translate(Coord::new(1, 43))
+                    .into_iter(),
+            );
+            display.draw(
+                ProFont18Point::render_str("hi's")
+                    .with_stroke(Some(Color::Black))
+                    .with_fill(Some(Color::White))
+                    .translate(Coord::new(hi.len() as i32 * 18 + 4, 48))
                     .into_iter(),
             );
 
@@ -129,26 +148,16 @@ fn main() -> Result<(), std::io::Error> {
                 ProFont14Point::render_str(&format!("http://{}/", ip))
                     .with_stroke(Some(Color::Black))
                     .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 58))
+                    .translate(Coord::new(1, 88))
                     .into_iter(),
             );
             display.draw(
-                ProFont14Point::render_str("curl")
+                ProFont14Point::render_str("Say hi: curl")
                     .with_stroke(Some(Color::Black))
                     .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 45))
+                    .translate(Coord::new(1, 73))
                     .into_iter(),
             );
-
-            if let Some(uname) = read_uname() {
-                display.draw(
-                    ProFont9Point::render_str(uname.trim())
-                        .with_stroke(Some(Color::Black))
-                        .with_fill(Some(Color::White))
-                        .translate(Coord::new(1, 93))
-                        .into_iter(),
-                );
-            }
 
             display.update(&mut delay).expect("error updating display");
             println!("Update...");
@@ -189,20 +198,6 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     Ok(())
-}
-
-fn read_uname() -> Option<String> {
-    Command::new("uname")
-        .arg("-smr")
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout).ok()
-            } else {
-                None
-            }
-        })
 }
 
 fn get_interface_ip(system: &System, interface: &str) -> Option<Ipv4Addr> {
