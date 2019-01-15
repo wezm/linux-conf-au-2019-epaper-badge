@@ -28,10 +28,8 @@ use nix::sys::utsname::uname;
 use rs_release::get_os_release;
 use systemstat::{IpAddr, Ipv4Addr, Platform, System};
 
-use std::process::Command;
-// use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
-use std::thread::sleep;
+use std::thread;
 use std::time::Duration;
 
 use crate::app::State;
@@ -41,7 +39,7 @@ const ROWS: u16 = 212;
 const COLS: u8 = 104;
 const LISTEN_ADDR: &str = "0.0.0.0";
 
-#[derive(StructOpt, Debug)]
+#[derive(StructOpt, Debug, Clone)]
 #[structopt(name = "lca2019", about = "linux.conf.au 2019 conference badge.")]
 struct Options {
     /// HTTP server port
@@ -63,6 +61,12 @@ struct Options {
     /// Don't loop, just run once and exit
     #[structopt(short = "o", long)]
     oneshot: bool,
+}
+
+#[derive(Debug, PartialEq)]
+struct DisplayState {
+    hi_count: usize,
+    ip: Option<Ipv4Addr>,
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -89,88 +93,108 @@ fn main() -> Result<(), std::io::Error> {
     }));
 
     if !options.nodisplay {
-        let mut delay = Delay {};
+        let options = options.clone();
+        let state = state.clone();
 
-        let display = hardware::display(COLS, ROWS)?;
+        thread::spawn(move || {
+            let mut delay = Delay {};
 
-        let mut black_buffer = [0u8; ROWS as usize * COLS as usize / 8];
-        let mut red_buffer = [0u8; ROWS as usize * COLS as usize / 8];
-        let mut display = GraphicDisplay::new(display, &mut black_buffer, &mut red_buffer);
+            let display = hardware::display(COLS, ROWS).expect("FIXME");
 
-        // TODO: Schedule this as a tokio timer
-        loop {
-            display.reset(&mut delay).expect("error resetting display");
-            println!("Reset and initialised");
-            let one_minute = Duration::from_secs(60);
-
-            display.clear(Color::White);
-            println!("Clear");
-
-            display.draw(
-                ProFont24Point::render_str("Wesley Moore")
-                    .with_stroke(Some(Color::Red))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, -4))
-                    .into_iter(),
-            );
-
-            display.draw(
-                ProFont14Point::render_str("wezm.net")
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 22))
-                    .into_iter(),
-            );
-
-            let hi = {
-                let state = state.read().expect("poisioned");
-                state.hi_count.to_string()
+            let mut black_buffer = [0u8; ROWS as usize * COLS as usize / 8];
+            let mut red_buffer = [0u8; ROWS as usize * COLS as usize / 8];
+            let mut display = GraphicDisplay::new(display, &mut black_buffer, &mut red_buffer);
+            let mut old_display_state = DisplayState {
+                hi_count: 1,
+                ip: get_interface_ip(&system, &options.interface),
             };
-            display.draw(
-                ProFont24Point::render_str(&hi)
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 43))
-                    .into_iter(),
-            );
-            display.draw(
-                ProFont18Point::render_str("hi's")
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(hi.len() as i32 * 18 + 4, 48))
-                    .into_iter(),
-            );
+            let update_delay = Duration::from_secs(15);
 
-            let ip = get_interface_ip(&system, &options.interface)
-                .map(|ip| ip.to_string())
-                .unwrap_or_else(|| "?.?.?.?".to_string());
-            display.draw(
-                ProFont14Point::render_str(&format!("http://{}/", ip))
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 88))
-                    .into_iter(),
-            );
-            display.draw(
-                ProFont14Point::render_str("Say hi: curl")
-                    .with_stroke(Some(Color::Black))
-                    .with_fill(Some(Color::White))
-                    .translate(Coord::new(1, 73))
-                    .into_iter(),
-            );
+            loop {
+                let display_state = {
+                    let state = state.read().expect("poisioned");
+                    DisplayState {
+                        hi_count: state.hi_count,
+                        ip: get_interface_ip(&system, &options.interface),
+                    }
+                };
 
-            display.update(&mut delay).expect("error updating display");
-            println!("Update...");
+                if display_state != old_display_state {
+                    display.reset(&mut delay).expect("error resetting display");
+                    println!("Reset and initialised");
 
-            println!("Finished - going to sleep");
-            display.deep_sleep()?;
+                    display.clear(Color::White);
+                    println!("Clear");
 
-            if options.oneshot {
-                break;
+                    display.draw(
+                        ProFont24Point::render_str("Wesley Moore")
+                            .with_stroke(Some(Color::Red))
+                            .with_fill(Some(Color::White))
+                            .translate(Coord::new(1, -4))
+                            .into_iter(),
+                    );
+
+                    display.draw(
+                        ProFont14Point::render_str("wezm.net")
+                            .with_stroke(Some(Color::Black))
+                            .with_fill(Some(Color::White))
+                            .translate(Coord::new(1, 22))
+                            .into_iter(),
+                    );
+
+                    let hi = display_state.hi_count.to_string();
+                    display.draw(
+                        ProFont24Point::render_str(&hi)
+                            .with_stroke(Some(Color::Black))
+                            .with_fill(Some(Color::White))
+                            .translate(Coord::new(1, 43))
+                            .into_iter(),
+                    );
+                    display.draw(
+                        ProFont18Point::render_str("hi's")
+                            .with_stroke(Some(Color::Black))
+                            .with_fill(Some(Color::White))
+                            .translate(Coord::new(hi.len() as i32 * 17 + 4, 48))
+                            .into_iter(),
+                    );
+
+                    let ip = display_state
+                        .ip
+                        .map(|ip| ip.to_string())
+                        .unwrap_or_else(|| "?.?.?.?".to_string());
+                    display.draw(
+                        ProFont14Point::render_str(&format!("http://{}/", ip))
+                            .with_stroke(Some(Color::Black))
+                            .with_fill(Some(Color::White))
+                            .translate(Coord::new(1, 88))
+                            .into_iter(),
+                    );
+                    display.draw(
+                        ProFont14Point::render_str("Say hi: curl")
+                            .with_stroke(Some(Color::Black))
+                            .with_fill(Some(Color::White))
+                            .translate(Coord::new(1, 73))
+                            .into_iter(),
+                    );
+
+                    display.update(&mut delay).expect("error updating display");
+                    println!("Update...");
+
+                    println!("Finished - going to sleep");
+                    display.deep_sleep().expect("FIXME");
+                } else {
+                    println!("No change, skip display update");
+                }
+
+                old_display_state = display_state;
+
+                if options.oneshot {
+                    break;
+                }
+
+                thread::sleep(update_delay);
             }
-
-            sleep(one_minute);
-        }
+        });
     }
 
     if !options.noserver {
