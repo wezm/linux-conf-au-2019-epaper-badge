@@ -150,8 +150,14 @@ fn main() -> Result<(), std::io::Error> {
                             .translate(Coord::new(1, 43))
                             .into_iter(),
                     );
+                    let unit = if display_state.hi_count != 1 {
+                        "hi's"
+                    }
+                    else {
+                        "hi"
+                    };
                     display.draw(
-                        ProFont18Point::render_str("hi's")
+                        ProFont18Point::render_str(unit)
                             .with_stroke(Some(Color::Black))
                             .with_fill(Some(Color::White))
                             .translate(Coord::new(hi.len() as i32 * 17 + 4, 48))
