@@ -31,9 +31,13 @@ use systemstat::{IpAddr, Ipv4Addr, Platform, System};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use std::alloc;
 
 use crate::app::State;
 use crate::system::Uptime;
+
+#[global_allocator]
+static GLOBAL: alloc::System = alloc::System;
 
 const ROWS: u16 = 212;
 const COLS: u8 = 104;
