@@ -152,8 +152,7 @@ fn main() -> Result<(), std::io::Error> {
                     );
                     let unit = if display_state.hi_count != 1 {
                         "hi's"
-                    }
-                    else {
+                    } else {
                         "hi"
                     };
                     display.draw(

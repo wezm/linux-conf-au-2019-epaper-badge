@@ -56,19 +56,23 @@ pub fn handle_request(
             Box::new(future::ok(Response::new(response_data.into())))
         }
         (&Method::POST, "/hi") => {
-            Box::new(req.into_body().concat2().map(move |_b| {
-                // Increment the hi count
-                let body = {
-                    let mut state = state.write().expect("poisioned");
-                    state.hi_count += 1;
+            Box::new(
+                req.into_body()
+                    .fold((), |_, _chunk| future::ok::<_, hyper::Error>(()))
+                    .map(move |()| {
+                        // Increment the hi count
+                        let body = {
+                            let mut state = state.write().expect("poisioned");
+                            state.hi_count += 1;
 
-                    format!(
-                        "Hello! You're the {} person to say hi today.\n",
-                        Ordinal(state.hi_count)
-                    )
-                };
-                Response::new(body.into())
-            }))
+                            format!(
+                                "Hello! You're the {} person to say hi today.\n",
+                                Ordinal(state.hi_count)
+                            )
+                        };
+                        Response::new(body.into())
+                    }),
+            )
         }
         _ => Box::new(future::ok(
             Response::builder()
