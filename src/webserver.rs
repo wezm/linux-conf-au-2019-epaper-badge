@@ -4,6 +4,7 @@ use hyper::{header, Body, Method, Request, Response, StatusCode};
 use memmem::{Searcher, TwoWaySearcher};
 use nix::sys::utsname::UtsName;
 use std::fmt;
+use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use systemstat::Memory;
 
@@ -35,6 +36,7 @@ pub struct HelloHtmlTemplate<'a> {
 
 pub fn handle_request(
     state: Arc<RwLock<State>>,
+    remote_addr: SocketAddr,
     req: Request<Body>,
 ) -> Box<Future<Item = Response<Body>, Error = hyper::Error> + Send> {
     match (req.method(), req.uri().path()) {
@@ -52,7 +54,7 @@ pub fn handle_request(
                 .is_some();
             let response_data = if accepts_html {
                 let template = HelloHtmlTemplate {
-                    hi_count: state.hi_count,
+                    hi_count: state.hi_count(),
                     memory: &state.memory,
                     uptime: &state.uptime,
                     os_name: &state.os_name,
@@ -71,7 +73,7 @@ pub fn handle_request(
                     .unwrap_or_else(|| "?.?.?.?".to_string());
 
                 let template = HelloTextTemplate {
-                    hi_count: state.hi_count,
+                    hi_count: state.hi_count(),
                     ip: &ip_string,
                     memory: &state.memory,
                     uptime: &state.uptime,
@@ -96,11 +98,11 @@ pub fn handle_request(
                         // Increment the hi count
                         let body = {
                             let mut state = state.write().expect("poisioned");
-                            state.hi_count += 1;
+                            state.inc_hi_count(remote_addr.ip());
 
                             format!(
                                 "Hello! You're the {} person to say hi today.\n",
-                                Ordinal(state.hi_count)
+                                Ordinal(state.hi_count())
                             )
                         };
                         Response::new(body.into())

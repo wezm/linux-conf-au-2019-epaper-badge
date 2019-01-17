@@ -19,7 +19,8 @@ use profont::{ProFont14Point, ProFont18Point, ProFont24Point};
 
 // HTTP Server
 use futures::Future;
-use hyper::service::service_fn;
+use hyper::server::conn::AddrStream;
+use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
 use std::net::SocketAddr;
 
@@ -28,10 +29,10 @@ use nix::sys::utsname::uname;
 use rs_release::get_os_release;
 use systemstat::{IpAddr, Ipv4Addr, Platform, System};
 
+use std::alloc;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use std::alloc;
 
 use crate::app::State;
 use crate::system::Uptime;
@@ -83,18 +84,17 @@ fn main() -> Result<(), std::io::Error> {
         .and_then(|mut hash| hash.remove("NAME"))
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let state = Arc::new(RwLock::new(State {
-        hi_count: 0,
-        ip: wlan0_address,
-        os_name: os_name,
-        uname: uname(),
-        memory: system.memory().ok(),
-        uptime: system
+    let state = Arc::new(RwLock::new(State::new(
+        wlan0_address,
+        os_name,
+        uname(),
+        system.memory().ok(),
+        system
             .uptime()
             .ok()
             .map(|uptime| Uptime::new(uptime.as_secs()))
             .unwrap_or_default(),
-    }));
+    )));
 
     if !options.nodisplay {
         let options = options.clone();
@@ -115,10 +115,11 @@ fn main() -> Result<(), std::io::Error> {
             let update_delay = Duration::from_secs(15);
 
             loop {
+                // FIXME: Extract this to an update display function
                 let display_state = {
                     let state = state.read().expect("poisioned");
                     DisplayState {
-                        hi_count: state.hi_count,
+                        hi_count: state.hi_count(),
                         ip: get_interface_ip(&system, &options.interface),
                     }
                 };
@@ -208,12 +209,14 @@ fn main() -> Result<(), std::io::Error> {
 
     if !options.noserver {
         // TODO: Implement shutdown?
-        let new_service = move || {
+        let new_service = make_service_fn(move |socket: &AddrStream| {
+            let remote_addr = socket.remote_addr();
+
             // FIXME: This double clone doesn't seem right... but works
             let state = state.clone();
 
-            service_fn(move |req| webserver::handle_request(state.clone(), req))
-        };
+            service_fn(move |req| webserver::handle_request(state.clone(), remote_addr, req))
+        });
 
         let addr = SocketAddr::from((LISTEN_ADDR.parse::<Ipv4Addr>().unwrap(), options.port));
         let server = Server::bind(&addr)
