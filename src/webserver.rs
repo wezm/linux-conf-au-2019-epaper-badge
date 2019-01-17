@@ -1,6 +1,7 @@
 use askama::Template;
 use futures::{future, Future, Stream};
-use hyper::{Body, Method, Request, Response, StatusCode};
+use hyper::{header, Body, Method, Request, Response, StatusCode};
+use memmem::{Searcher, TwoWaySearcher};
 use nix::sys::utsname::UtsName;
 use std::fmt;
 use std::sync::{Arc, RwLock};
@@ -13,9 +14,19 @@ static NOT_FOUND: &[u8] = b"Not found\n";
 
 #[derive(Template)]
 #[template(path = "hi.txt")]
-pub struct HelloTemplate<'a> {
+pub struct HelloTextTemplate<'a> {
     hi_count: usize,
     ip: &'a str,
+    os_name: &'a str,
+    uname: &'a UtsName,
+    memory: &'a Option<Memory>,
+    uptime: &'a Uptime,
+}
+
+#[derive(Template)]
+#[template(path = "hi.html")]
+pub struct HelloHtmlTemplate<'a> {
+    hi_count: usize,
     os_name: &'a str,
     uname: &'a UtsName,
     memory: &'a Option<Memory>,
@@ -33,25 +44,47 @@ pub fn handle_request(
         | (&Method::HEAD, "/hi") => {
             let state = state.read().expect("poisioned"); // FIXME: Deal with this
 
-            // FIXME: Don't do this everytime
-            let ip_string = state
-                .ip
-                .map(|ip| ip.to_string())
-                .unwrap_or_else(|| "?.?.?.?".to_string());
+            // See if the user agent supports html
+            let accepts_html = req
+                .headers()
+                .get(header::ACCEPT)
+                .and_then(|accept| TwoWaySearcher::new(b"text/html").search_in(accept.as_bytes()))
+                .is_some();
+            let response_data = if accepts_html {
+                let template = HelloHtmlTemplate {
+                    hi_count: state.hi_count,
+                    memory: &state.memory,
+                    uptime: &state.uptime,
+                    os_name: &state.os_name,
+                    uname: &state.uname,
+                };
 
-            let template = HelloTemplate {
-                hi_count: state.hi_count,
-                ip: &ip_string,
-                memory: &state.memory,
-                uptime: &state.uptime,
-                os_name: &state.os_name,
-                uname: &state.uname,
+                template
+                    .render()
+                    .ok()
+                    .unwrap_or_else(|| "Internal Server Error\n".to_string())
+            } else {
+                // FIXME: Don't do this everytime
+                let ip_string = state
+                    .ip
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_else(|| "?.?.?.?".to_string());
+
+                let template = HelloTextTemplate {
+                    hi_count: state.hi_count,
+                    ip: &ip_string,
+                    memory: &state.memory,
+                    uptime: &state.uptime,
+                    os_name: &state.os_name,
+                    uname: &state.uname,
+                };
+
+                template
+                    .render()
+                    .ok()
+                    .unwrap_or_else(|| "Internal Server Error\n".to_string())
             };
 
-            let response_data = template
-                .render()
-                .ok()
-                .unwrap_or_else(|| "Internal Server Error\n".to_string());
             // FIXME: Set HTTP status
             Box::new(future::ok(Response::new(response_data.into())))
         }

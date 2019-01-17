@@ -2,16 +2,18 @@ Hi I'm Wes!
 
 Welcome to my conference badge. It's powered by Linux and
 Rust running on a Raspberry Pi Zero W with a tri-colour Inky
-pHAT ePaper dispay.
+pHAT ePaper dispay. The source code is on GitHub:
+
+https://github.com/wezm/linux-conf-au-2019-epaper-badge
 
 
 Say Hello
 ---------
 
 {% match hi_count %}
-  {%- when 0 %}No people have said hi today.
-  {%- when 1 %}One person has said hi today.
-  {%- else %}{{ hi_count }} people have said hi today.
+  {%- when 0 %}No people have said hi.
+  {%- when 1 %}One person has said hi.
+  {%- else %}{{ hi_count }} people have said hi.
 {% endmatch %}
 Say hello in person and on the badge. To increment the hello
 counter on the badge:
