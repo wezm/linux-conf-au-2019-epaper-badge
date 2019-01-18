@@ -30,6 +30,7 @@ use rs_release::get_os_release;
 use systemstat::{IpAddr, Ipv4Addr, Platform, System};
 
 use std::alloc;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -83,8 +84,10 @@ fn main() -> Result<(), std::io::Error> {
         .ok()
         .and_then(|mut hash| hash.remove("NAME"))
         .unwrap_or_else(|| "Unknown".to_string());
+    let save_path = Path::new("hi_count.txt");
 
-    let state = Arc::new(RwLock::new(State::new(
+    let state = Arc::new(RwLock::new(State::load(
+        &save_path,
         wlan0_address,
         os_name,
         uname(),
@@ -94,7 +97,7 @@ fn main() -> Result<(), std::io::Error> {
             .ok()
             .map(|uptime| Uptime::new(uptime.as_secs()))
             .unwrap_or_default(),
-    )));
+    )?));
 
     if !options.nodisplay {
         let options = options.clone();
@@ -118,10 +121,16 @@ fn main() -> Result<(), std::io::Error> {
                 // FIXME: Extract this to an update display function
                 let display_state = {
                     let state = state.read().expect("poisioned");
-                    DisplayState {
+                    let new_display_state = DisplayState {
                         hi_count: state.hi_count(),
                         ip: get_interface_ip(&system, &options.interface),
+                    };
+
+                    if new_display_state.hi_count != old_display_state.hi_count {
+                        state.save_hi_count(&save_path).expect("io error");
                     }
+
+                    new_display_state
                 };
 
                 if display_state != old_display_state {
