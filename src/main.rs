@@ -109,7 +109,7 @@ fn main() -> Result<(), std::io::Error> {
         thread::spawn(move || {
             let mut delay = Delay {};
 
-            let display = hardware::display(COLS, ROWS).expect("FIXME");
+            let display = hardware::display(COLS, ROWS).expect("unable to create display");
 
             let mut black_buffer = [0u8; ROWS as usize * COLS as usize / 8];
             let mut red_buffer = [0u8; ROWS as usize * COLS as usize / 8];
@@ -121,7 +121,7 @@ fn main() -> Result<(), std::io::Error> {
             let update_delay = Duration::from_secs(15);
 
             loop {
-                // FIXME: Extract this to an update display function
+                // TODO: Extract this to an update display function
                 let display_state = {
                     let state = state.read().expect("poisioned");
                     let new_display_state = DisplayState {
@@ -130,15 +130,19 @@ fn main() -> Result<(), std::io::Error> {
                     };
 
                     if new_display_state.hi_count != old_display_state.hi_count {
-                        state.save_hi_count(&save_path).expect("io error");
+                        if let Err(err) = state.save_hi_count(&save_path) {
+                            println!("unable to save hi count: {:?}", err);
+                        }
                     }
 
                     new_display_state
                 };
 
                 if display_state != old_display_state {
-                    display.reset(&mut delay).expect("error resetting display");
-                    println!("Reset and initialised");
+                    match display.reset(&mut delay) {
+                        Ok(()) => println!("Reset and initialised"),
+                        Err(err) => println!("Error resetting display: {:?}", err),
+                    }
 
                     display.clear(Color::White);
                     println!("Clear");
@@ -199,11 +203,15 @@ fn main() -> Result<(), std::io::Error> {
                             .into_iter(),
                     );
 
-                    display.update(&mut delay).expect("error updating display");
-                    println!("Update...");
+                    match display.update(&mut delay) {
+                        Ok(()) => println!("Update..."),
+                        Err(err) => println!("error updating display: {:?}", err),
+                    }
 
-                    println!("Finished - going to sleep");
-                    display.deep_sleep().expect("FIXME");
+                    match display.deep_sleep() {
+                        Ok(()) => println!("Finished - going to sleep"),
+                        Err(err) => println!("Error going to sleep: {:?}", err),
+                    }
                 } else {
                     println!("No change, skip display update");
                 }
@@ -224,7 +232,7 @@ fn main() -> Result<(), std::io::Error> {
         let new_service = make_service_fn(move |socket: &AddrStream| {
             let remote_addr = socket.remote_addr();
 
-            // FIXME: This double clone doesn't seem right... but works
+            // This double clone doesn't seem right... but works
             let state = state.clone();
 
             service_fn(move |req| webserver::handle_request(state.clone(), remote_addr, req))
