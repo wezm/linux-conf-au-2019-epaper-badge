@@ -19,6 +19,7 @@ pub struct State {
     pub memory: Option<Memory>,
     pub uptime: Uptime,
     pub hellos: HashMap<IpAddr, Instant>,
+    max_age: Duration,
 }
 
 impl State {
@@ -29,6 +30,7 @@ impl State {
         uname: UtsName,
         memory: Option<Memory>,
         uptime: Uptime,
+        max_age: Duration,
     ) -> Self {
         State {
             hi_count,
@@ -38,6 +40,7 @@ impl State {
             memory,
             uptime,
             hellos: HashMap::new(),
+            max_age,
         }
     }
 
@@ -48,6 +51,7 @@ impl State {
         uname: UtsName,
         memory: Option<Memory>,
         uptime: Uptime,
+        max_age: Duration,
     ) -> io::Result<Self> {
         let hi_count = match Self::load_hi_count(save_path) {
             Ok(hi_count) => hi_count,
@@ -57,13 +61,24 @@ impl State {
             },
         };
 
-        Ok(Self::new(hi_count, ip, os_name, uname, memory, uptime))
+        Ok(Self::new(
+            hi_count, ip, os_name, uname, memory, uptime, max_age,
+        ))
     }
 
     pub fn inc_hi_count(&mut self, from: IpAddr) {
-        if self.hellos.insert(from, Instant::now()).is_none() {
-            self.hi_count += 1;
+        let now = Instant::now();
+
+        match self.hellos.get(&from).map(|instant| now - *instant) {
+            Some(age) if age > self.max_age => self.inc_hi_count_impl(from, now),
+            None => self.inc_hi_count_impl(from, now),
+            _ => (),
         }
+    }
+
+    fn inc_hi_count_impl(&mut self, from: IpAddr, now: Instant) {
+        self.hellos.insert(from, now);
+        self.hi_count += 1;
     }
 
     pub fn hi_count(&self) -> usize {
@@ -92,5 +107,51 @@ impl State {
         println!("Saved hi count");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nix::sys::utsname::uname;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::thread;
+
+    fn test_state(ip: Ipv4Addr) -> State {
+        State::new(
+            0,
+            Some(ip),
+            "Test OS".to_string(),
+            uname(),
+            None,
+            Uptime::default(),
+            Duration::from_millis(100),
+        )
+    }
+
+    #[test]
+    fn test_inc_hello_dedup() {
+        let localhost = Ipv4Addr::new(127, 0, 0, 1);
+        let mut state = test_state(localhost);
+
+        state.inc_hi_count(IpAddr::V4(localhost));
+        state.inc_hi_count(IpAddr::V4(localhost));
+        state.inc_hi_count(IpAddr::V4(localhost));
+
+        assert_eq!(state.hi_count(), 1);
+    }
+
+    #[test]
+    fn test_inc_hello_expiration() {
+        let localhost = Ipv4Addr::new(127, 0, 0, 1);
+        let mut state = test_state(localhost);
+
+        state.inc_hi_count(IpAddr::V4(localhost));
+        state.inc_hi_count(IpAddr::V4(localhost));
+        thread::sleep(Duration::from_millis(101));
+        state.inc_hi_count(IpAddr::V4(localhost));
+        state.inc_hi_count(IpAddr::V4(localhost));
+
+        assert_eq!(state.hi_count(), 2);
     }
 }

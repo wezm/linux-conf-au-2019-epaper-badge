@@ -84,7 +84,9 @@ fn main() -> Result<(), std::io::Error> {
         .ok()
         .and_then(|mut hash| hash.remove("NAME"))
         .unwrap_or_else(|| "Unknown".to_string());
+
     let save_path = Path::new("hi_count.txt");
+    let hello_max_age = Duration::from_secs(60 * 60);
 
     let state = Arc::new(RwLock::new(State::load(
         &save_path,
@@ -97,6 +99,7 @@ fn main() -> Result<(), std::io::Error> {
             .ok()
             .map(|uptime| Uptime::new(uptime.as_secs()))
             .unwrap_or_default(),
+        hello_max_age,
     )?));
 
     if !options.nodisplay {
