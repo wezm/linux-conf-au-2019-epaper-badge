@@ -10,7 +10,6 @@ use systemstat::{Ipv4Addr, Memory};
 
 use crate::system::Uptime;
 
-// #[derive(Debug)]
 pub struct State {
     hi_count: usize,
     pub ip: Option<Ipv4Addr>,
@@ -61,6 +60,7 @@ impl State {
             },
         };
 
+        println!("Loaded state with hi count {}", hi_count);
         Ok(Self::new(
             hi_count, ip, os_name, uname, memory, uptime, max_age,
         ))
@@ -87,7 +87,7 @@ impl State {
 
     fn load_hi_count(path: &Path) -> io::Result<usize> {
         let string_count = std::fs::read_to_string(path)?;
-        usize::from_str(&string_count).or(Ok(0))
+        usize::from_str(string_count.trim()).or(Ok(0))
     }
 
     pub fn save_hi_count(&self, path: &Path) -> io::Result<()> {
