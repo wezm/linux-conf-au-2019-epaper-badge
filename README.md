@@ -23,6 +23,14 @@ with:
 
 Alternatively use `-p` to set the port to a non-privileged one.
 
+### Systemd Service
+
+Copy `lca2019.service` to `/etc/systemd/system/`.
+
+    sudo systemctl daemon-reload
+    sudo setcap cap_net_bind_service=ep lca2019
+    sudo systemctl enable --now lca2019
+
 ## Development
 
 ### Auto-reloading server

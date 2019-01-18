@@ -1,0 +1,13 @@
+[Unit]
+Description=Conference Badge
+After=network.target
+WorkingDirectory=~
+
+[Service]
+ExecStart=/home/pi/lca2019
+Restart=always
+User=pi
+Group=pi
+
+[Install]
+WantedBy=multi-user.target
