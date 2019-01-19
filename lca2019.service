@@ -1,11 +1,12 @@
 [Unit]
 Description=Conference Badge
 After=network.target
-WorkingDirectory=~
 
 [Service]
+WorkingDirectory=~
 ExecStart=/home/pi/lca2019
 Restart=always
+RestartSec=5
 User=pi
 Group=pi
 
