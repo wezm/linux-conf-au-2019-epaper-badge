@@ -101,7 +101,7 @@ pub fn handle_request(
                             state.inc_hi_count(remote_addr.ip());
 
                             format!(
-                                "Hello! You're the {} person to say hi today.\n",
+                                "Hello! You're the {} person to say hi.\n",
                                 Ordinal(state.hi_count())
                             )
                         };
