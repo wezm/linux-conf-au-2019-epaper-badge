@@ -15,7 +15,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::Drawing;
 
 // Font
-use profont::{ProFont14Point, ProFont18Point, ProFont24Point};
+use profont::{ProFont12Point, ProFont14Point, ProFont24Point};
 
 // HTTP Server
 use futures::Future;
@@ -102,11 +102,11 @@ fn main() -> Result<(), std::io::Error> {
         hello_max_age,
     )?));
 
-    if !options.nodisplay {
+    let display_thread = if !options.nodisplay {
         let options = options.clone();
         let state = state.clone();
 
-        thread::spawn(move || {
+        Some(thread::spawn(move || {
             let mut delay = Delay {};
 
             let display = hardware::display(COLS, ROWS).expect("unable to create display");
@@ -168,19 +168,26 @@ fn main() -> Result<(), std::io::Error> {
                         ProFont24Point::render_str(&hi)
                             .with_stroke(Some(Color::Black))
                             .with_fill(Some(Color::White))
-                            .translate(Coord::new(1, 43))
+                            .translate(Coord::new(1, 42))
                             .into_iter(),
                     );
                     let unit = if display_state.hi_count != 1 {
-                        "hi's"
+                        "people have"
                     } else {
-                        "hi"
+                        "person has"
                     };
                     display.draw(
-                        ProFont18Point::render_str(unit)
+                        ProFont12Point::render_str(unit)
                             .with_stroke(Some(Color::Black))
                             .with_fill(Some(Color::White))
-                            .translate(Coord::new(hi.len() as i32 * 17 + 4, 48))
+                            .translate(Coord::new(hi.len() as i32 * 17 + 4, 43))
+                            .into_iter(),
+                    );
+                    display.draw(
+                        ProFont12Point::render_str("said hello")
+                            .with_stroke(Some(Color::Black))
+                            .with_fill(Some(Color::White))
+                            .translate(Coord::new(hi.len() as i32 * 17 + 4, 57))
                             .into_iter(),
                     );
 
@@ -188,15 +195,32 @@ fn main() -> Result<(), std::io::Error> {
                         .ip
                         .map(|ip| ip.to_string())
                         .unwrap_or_else(|| "?.?.?.?".to_string());
+                    // http://192.168.100.100/ = 23 chars 230px
+                    // http://10.0.0.18/ = 17 chars 170px
+                    let url = format!("http://{}/", ip);
+
+                    // If URL is longer than will fit on the screen use a smaller font
+                    // 14pt is 10px wide
+                    // 12pt is 8px wide
+                    if url.len() * 10 > ROWS as usize {
+                        display.draw(
+                            ProFont12Point::render_str(&url)
+                                .with_stroke(Some(Color::Black))
+                                .with_fill(Some(Color::White))
+                                .translate(Coord::new(1, 90))
+                                .into_iter(),
+                        );
+                    } else {
+                        display.draw(
+                            ProFont14Point::render_str(&url)
+                                .with_stroke(Some(Color::Black))
+                                .with_fill(Some(Color::White))
+                                .translate(Coord::new(1, 88))
+                                .into_iter(),
+                        );
+                    }
                     display.draw(
-                        ProFont14Point::render_str(&format!("http://{}/", ip))
-                            .with_stroke(Some(Color::Black))
-                            .with_fill(Some(Color::White))
-                            .translate(Coord::new(1, 88))
-                            .into_iter(),
-                    );
-                    display.draw(
-                        ProFont14Point::render_str("Say hi: curl")
+                        ProFont14Point::render_str("Say hi at:")
                             .with_stroke(Some(Color::Black))
                             .with_fill(Some(Color::White))
                             .translate(Coord::new(1, 73))
@@ -224,8 +248,10 @@ fn main() -> Result<(), std::io::Error> {
 
                 thread::sleep(update_delay);
             }
-        });
-    }
+        }))
+    } else {
+        None
+    };
 
     if !options.noserver {
         // TODO: Implement shutdown?
@@ -251,6 +277,13 @@ fn main() -> Result<(), std::io::Error> {
         );
 
         hyper::rt::run(server);
+    }
+
+    match (options.oneshot, display_thread) {
+        (true, Some(thread)) => {
+            let _ = thread.join();
+        }
+        _ => (),
     }
 
     Ok(())
