@@ -43,7 +43,7 @@ const ROWS: u16 = 212;
 const COLS: u8 = 104;
 const LISTEN_ADDR: &str = "0.0.0.0";
 const QR_X: i32 = 150;
-const QR_Y: i32 = 25;
+const QR_Y: i32 = 30;
 
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(name = "lca2019", about = "linux.conf.au 2019 conference badge.")]
@@ -215,7 +215,7 @@ fn main() -> Result<(), std::io::Error> {
                     // Draw the URL QR code
                     let qrcode =
                         QrCode::with_error_correction_level(url.as_bytes(), EcLevel::L).unwrap();
-                    display.draw(QrCodeIterator::new(qrcode, Coord::new(QR_X, QR_Y)));
+                    display.draw(QrCodeIterator::new(qrcode, Coord::new(QR_X, QR_Y), 2));
 
                     match display.update(&mut delay) {
                         Ok(()) => println!("Update..."),
@@ -294,10 +294,34 @@ struct QrCodeIterator {
 }
 
 impl QrCodeIterator {
-    pub fn new(code: QrCode, top_left: Coord) -> Self {
+    pub fn new(code: QrCode, top_left: Coord, scale: usize) -> Self {
+        let width = code.width() * scale;
+        let colors = if scale > 1 {
+            // Map each pixel to more...
+            let colors = code.into_colors();
+            let mut expanded = vec![qrcode::Color::Light; colors.len() * scale.pow(2)];
+            for (i, color) in colors.into_iter().enumerate() {
+                if color == qrcode::Color::Light {
+                    continue;
+                }
+
+                for y in 0..scale {
+                    for x in 0..scale {
+                        expanded[i * scale + x + (width * y) + (i * scale / width * width)] = color;
+                    }
+                }
+
+            }
+
+            expanded
+        }
+        else {
+            code.into_colors()
+        };
+
         QrCodeIterator {
-            width: code.width(),
-            colors: code.into_colors(),
+            width,
+            colors,
             index: 0,
             x: 0,
             y: 0,
