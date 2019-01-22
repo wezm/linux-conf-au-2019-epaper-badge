@@ -111,6 +111,11 @@ version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "checked_int_cast"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "chrono"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -362,6 +367,7 @@ dependencies = [
  "memmem 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "profont 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "qrcode 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rs-release 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "ssd1675 0.1.0 (git+https://github.com/wezm/ssd1675.git?branch=busy-wait)",
  "structopt 0.2.14 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -613,6 +619,14 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "embedded-graphics 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "qrcode"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "checked_int_cast 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1181,6 +1195,7 @@ dependencies = [
 "checksum cast 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "926013f2860c46252efceabb19f4a6b308197505082c609025aa6706c011d427"
 "checksum cc 1.0.28 (registry+https://github.com/rust-lang/crates.io-index)" = "bb4a8b715cb4597106ea87c7c84b2f1d452c7492033765df7f32651e66fcf749"
 "checksum cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "082bb9b28e00d3c9d39cc03e64ce4cea0f1bb9b3fde493f0cbc008472d22bdf4"
+"checksum checked_int_cast 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "17cc5e6b5ab06331c33589842070416baa137e8b0eb912b008cfd4a78ada7919"
 "checksum chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "45912881121cb26fad7c38c17ba7daa18764771836b34fab7d3fbd93ed633878"
 "checksum clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b957d88f4b6a63b9d70d5f454ac8011819c6efa7727858f458ab71c756ce2d3e"
 "checksum cloudabi 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
@@ -1236,6 +1251,7 @@ dependencies = [
 "checksum parking_lot_core 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "94c8c7923936b28d546dfd14d4472eaf34c99b14e1c973a32b3e6d4eb04298c9"
 "checksum proc-macro2 0.4.25 (registry+https://github.com/rust-lang/crates.io-index)" = "d3797b7142c9aa74954e351fc089bbee7958cebbff6bf2815e7ffff0b19f547d"
 "checksum profont 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "99eb32d8f0966471aa6eb217eea56f57c49b88e17a2863054ee4acdeabe8f561"
+"checksum qrcode 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b3553d8614cd59cede2a00db69bc96ea72dfdd92c041600f06b100f6f2699b26"
 "checksum quote 0.6.10 (registry+https://github.com/rust-lang/crates.io-index)" = "53fa22a1994bd0f9372d7a816207d8a2677ad0325b073f5c5332760f0fb62b5c"
 "checksum rand 0.6.4 (registry+https://github.com/rust-lang/crates.io-index)" = "3906503e80ac6cbcacb2c2973fa8e473f24d7e2747c8c92bb230c2441cad96b5"
 "checksum rand_chacha 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "556d3a1ca6600bfcbab7c7c91ccb085ac7fbbcd70e008a98742e7847f4f7bcef"

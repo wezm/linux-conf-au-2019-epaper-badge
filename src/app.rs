@@ -6,50 +6,59 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use systemstat::{Ipv4Addr, Memory};
+
+use systemstat::{Memory, System, Platform};
+use nix::sys::utsname::uname;
+use rs_release::get_os_release;
 
 use crate::system::Uptime;
 
 pub struct State {
     hi_count: usize,
-    pub ip: Option<Ipv4Addr>,
+    interface: String,
+    pub ip: Option<systemstat::Ipv4Addr>,
     pub os_name: String,
     pub uname: UtsName,
     pub memory: Option<Memory>,
     pub uptime: Uptime,
     pub hellos: HashMap<IpAddr, Instant>,
     max_age: Duration,
+    system: System,
 }
 
 impl State {
     pub fn new(
         hi_count: usize,
-        ip: Option<Ipv4Addr>,
-        os_name: String,
-        uname: UtsName,
-        memory: Option<Memory>,
-        uptime: Uptime,
-        max_age: Duration,
+        interface: String,
+        max_age: Duration
     ) -> Self {
+        let system = System::new();
+        let os_name = get_os_release()
+            .ok()
+            .and_then(|mut hash| hash.remove("NAME"))
+            .unwrap_or_else(|| "Unknown".to_string());
+
         State {
             hi_count,
-            ip,
+            ip: get_interface_ip(&system, &interface),
             os_name,
-            uname,
-            memory,
-            uptime,
+            uname: uname(),
+            memory: system.memory().ok(),
+            uptime: system
+                .uptime()
+                .ok()
+                .map(|uptime| Uptime::new(uptime.as_secs()))
+                .unwrap_or_default(),
             hellos: HashMap::new(),
             max_age,
+            system,
+            interface,
         }
     }
 
     pub fn load(
         save_path: &Path,
-        ip: Option<Ipv4Addr>,
-        os_name: String,
-        uname: UtsName,
-        memory: Option<Memory>,
-        uptime: Uptime,
+        interface: String,
         max_age: Duration,
     ) -> io::Result<Self> {
         let hi_count = match Self::load_hi_count(save_path) {
@@ -62,7 +71,7 @@ impl State {
 
         println!("Loaded state with hi count {}", hi_count);
         Ok(Self::new(
-            hi_count, ip, os_name, uname, memory, uptime, max_age,
+            hi_count, interface, max_age,
         ))
     }
 
@@ -108,6 +117,33 @@ impl State {
 
         Ok(())
     }
+
+    pub fn refresh(&mut self) {
+        self.ip = get_interface_ip(&self.system, &self.interface);
+        self.memory = self.system.memory().ok();
+        self.uptime = self.system
+            .uptime()
+            .ok()
+            .map(|uptime| Uptime::new(uptime.as_secs()))
+            .unwrap_or_default();
+    }
+}
+
+fn get_interface_ip(system: &System, interface: &str) -> Option<systemstat::Ipv4Addr> {
+    if let Some(network) = system
+        .networks()
+        .ok()
+        .and_then(|mut info| info.remove(interface))
+    {
+        for addr in network.addrs {
+            match addr.addr {
+                systemstat::IpAddr::V4(addr) => return Some(addr),
+                _ => (),
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ use ssd1675::{Color, GraphicDisplay};
 use embedded_graphics::coord::Coord;
 use embedded_graphics::prelude::*;
 use embedded_graphics::Drawing;
+use qrcode::{EcLevel, QrCode};
 
 // Font
 use profont::{ProFont12Point, ProFont14Point, ProFont24Point};
@@ -25,9 +26,7 @@ use hyper::Server;
 use std::net::SocketAddr;
 
 // System info
-use nix::sys::utsname::uname;
-use rs_release::get_os_release;
-use systemstat::{IpAddr, Ipv4Addr, Platform, System};
+use systemstat::Ipv4Addr;
 
 use std::alloc;
 use std::path::Path;
@@ -36,7 +35,6 @@ use std::thread;
 use std::time::Duration;
 
 use crate::app::State;
-use crate::system::Uptime;
 
 #[global_allocator]
 static GLOBAL: alloc::System = alloc::System;
@@ -44,6 +42,8 @@ static GLOBAL: alloc::System = alloc::System;
 const ROWS: u16 = 212;
 const COLS: u8 = 104;
 const LISTEN_ADDR: &str = "0.0.0.0";
+const QR_X: i32 = 150;
+const QR_Y: i32 = 25;
 
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(name = "lca2019", about = "linux.conf.au 2019 conference badge.")]
@@ -78,27 +78,12 @@ struct DisplayState {
 fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
 
-    let system = System::new();
-    let wlan0_address = get_interface_ip(&system, &options.interface);
-    let os_name = get_os_release()
-        .ok()
-        .and_then(|mut hash| hash.remove("NAME"))
-        .unwrap_or_else(|| "Unknown".to_string());
-
     let save_path = Path::new("hi_count.txt");
     let hello_max_age = Duration::from_secs(60 * 60);
 
     let state = Arc::new(RwLock::new(State::load(
         &save_path,
-        wlan0_address,
-        os_name,
-        uname(),
-        system.memory().ok(),
-        system
-            .uptime()
-            .ok()
-            .map(|uptime| Uptime::new(uptime.as_secs()))
-            .unwrap_or_default(),
+        options.interface.clone(),
         hello_max_age,
     )?));
 
@@ -116,7 +101,7 @@ fn main() -> Result<(), std::io::Error> {
             let mut display = GraphicDisplay::new(display, &mut black_buffer, &mut red_buffer);
             let mut old_display_state = DisplayState {
                 hi_count: 1,
-                ip: get_interface_ip(&system, &options.interface),
+                ip: None,
             };
             let update_delay = Duration::from_secs(15);
 
@@ -126,7 +111,7 @@ fn main() -> Result<(), std::io::Error> {
                     let state = state.read().expect("poisioned");
                     let new_display_state = DisplayState {
                         hi_count: state.hi_count(),
-                        ip: get_interface_ip(&system, &options.interface),
+                        ip: state.ip,
                     };
 
                     if new_display_state.hi_count != old_display_state.hi_count {
@@ -227,6 +212,11 @@ fn main() -> Result<(), std::io::Error> {
                             .into_iter(),
                     );
 
+                    // Draw the URL QR code
+                    let qrcode =
+                        QrCode::with_error_correction_level(url.as_bytes(), EcLevel::L).unwrap();
+                    display.draw(QrCodeIterator::new(qrcode, Coord::new(QR_X, QR_Y)));
+
                     match display.update(&mut delay) {
                         Ok(()) => println!("Update..."),
                         Err(err) => println!("error updating display: {:?}", err),
@@ -247,6 +237,11 @@ fn main() -> Result<(), std::io::Error> {
                 }
 
                 thread::sleep(update_delay);
+
+                {
+                    let mut state = state.write().expect("poisioned");
+                    state.refresh();
+                }
             }
         }))
     } else {
@@ -269,12 +264,12 @@ fn main() -> Result<(), std::io::Error> {
             .serve(new_service)
             .map_err(|e| eprintln!("server error: {}", e));
 
-        println!(
-            "Starting server on http:://{}",
-            wlan0_address
-                .map(|ip| format!("{}:{}", ip, options.port))
-                .unwrap_or_else(|| format!("{}:{}", LISTEN_ADDR, options.port))
-        );
+        // println!(
+        //     "Starting server on http:://{}",
+        //     wlan0_address
+        //         .map(|ip| format!("{}:{}", ip, options.port))
+        //         .unwrap_or_else(|| format!("{}:{}", LISTEN_ADDR, options.port))
+        // );
 
         hyper::rt::run(server);
     }
@@ -289,26 +284,63 @@ fn main() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn get_interface_ip(system: &System, interface: &str) -> Option<Ipv4Addr> {
-    if let Some(network) = system
-        .networks()
-        .ok()
-        .and_then(|mut info| info.remove(interface))
-    {
-        for addr in network.addrs {
-            match addr.addr {
-                IpAddr::V4(addr) => return Some(addr),
-                _ => (),
-            }
+struct QrCodeIterator {
+    colors: Vec<qrcode::Color>,
+    top_left: Coord,
+    index: usize,
+    width: usize,
+    x: usize,
+    y: usize,
+}
+
+impl QrCodeIterator {
+    pub fn new(code: QrCode, top_left: Coord) -> Self {
+        QrCodeIterator {
+            width: code.width(),
+            colors: code.into_colors(),
+            index: 0,
+            x: 0,
+            y: 0,
+            top_left,
         }
     }
+}
 
-    None
+impl Iterator for QrCodeIterator {
+    type Item = Pixel<Color>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.colors.len() {
+            None
+        } else {
+            let colour = self.colors[self.index].select(Color::Black, Color::White);
+            let pixel = Pixel(
+                Coord::new(
+                    self.top_left.0 + self.x as i32,
+                    self.top_left.1 + self.y as i32,
+                )
+                .to_unsigned(),
+                colour,
+            );
+
+            self.index += 1;
+
+            if self.x != 0 && self.x % (self.width - 1) == 0 {
+                self.x = 0;
+                self.y += 1;
+            } else {
+                self.x += 1;
+            }
+
+            Some(pixel)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::system::Uptime;
 
     #[test]
     fn test_uptime_days() {
